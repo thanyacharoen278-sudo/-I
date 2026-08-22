@@ -1,0 +1,504 @@
+--[[
+    DekuzXP | D · PVP
+    Lock/Aim OK · Attack แรงขึ้น · บินเร็ว
+    LeftAlt = UI
+]]
+
+repeat task.wait() until game:IsLoaded()
+
+local LOGO = "rbxassetid://120245531583106"
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VU = game:GetService("VirtualUser")
+local RS = game:GetService("ReplicatedStorage")
+local LP = Players.LocalPlayer
+repeat task.wait() until LP
+
+local okLib, Compkiller = pcall(function()
+    return loadstring(game:HttpGet(
+        "https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"
+    ))()
+end)
+if not okLib or not Compkiller then
+    warn("[D] CompKiller failed")
+    return
+end
+
+local Notifier = Compkiller.newNotify()
+pcall(function() Compkiller:Loader(LOGO, 0.4).yield() end)
+
+local Window = Compkiller.new({
+    Name = "D · PVP",
+    Keybind = "LeftAlt",
+    Logo = LOGO,
+    Scale = UDim2.fromOffset(320, 300),
+    TextSize = 11,
+})
+
+pcall(function()
+    Compkiller:SetTheme("Dark Blue")
+    local C = Compkiller.Colors
+    C.Highlight = Color3.fromRGB(70, 160, 255)
+    C.Toggle = Color3.fromRGB(50, 140, 255)
+    C.BGDBColor = Color3.fromRGB(12, 18, 36)
+    Compkiller:RefreshCurrentColor()
+end)
+
+local ON = {
+    Lock = false,
+    Fly = false,
+    Aim = false,
+    Attack = false,
+    Shake = true,
+    Nearest = true,
+}
+
+local TargetName = ""
+local LOCK_Y = 3.5
+local FLY_SPEED = 450          -- เร็วขึ้น (เดิม \~250)
+local HITBOX = 80
+local AC = nil
+local bp = nil
+
+local function Char()
+    return LP.Character
+end
+local function Hum()
+    local c = Char()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+local function HRP()
+    local c = Char()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function say(t)
+    print("[D]", t)
+    pcall(function()
+        Notifier.new({ Title = "D", Content = t, Duration = 2, Icon = LOGO })
+    end)
+end
+
+local function Nearest()
+    local h = HRP()
+    if not h then return nil end
+    local best, bestD = nil, 1e9
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LP then
+        else
+            local ch = p.Character
+            if ch then
+                local hum = ch:FindFirstChildOfClass("Humanoid")
+                local root = ch:FindFirstChild("HumanoidRootPart")
+                if root and hum and hum.Health > 0 then
+                    local d = (h.Position - root.Position).Magnitude
+                    if d < bestD then
+                        best = p
+                        bestD = d
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function TargetRoot()
+    local plr = nil
+    if ON.Nearest or TargetName == "" then
+        plr = Nearest()
+        if plr then TargetName = plr.Name end
+    else
+        plr = Players:FindFirstChild(TargetName)
+        if not plr then
+            plr = Nearest()
+            if plr then TargetName = plr.Name end
+        end
+    end
+    if not plr or not plr.Character then return nil end
+    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= 0 then return nil end
+    return plr.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function Equip()
+    pcall(function()
+        local c, hum = Char(), Hum()
+        if not c or not hum then return end
+        if c:FindFirstChildOfClass("Tool") then return end
+        local bag = LP:FindFirstChild("Backpack")
+        if not bag then return end
+        for _, t in ipairs(bag:GetChildren()) do
+            if t:IsA("Tool") then
+                local n = string.lower(t.Name)
+                if not string.find(n, "fruit", 1, true) and not string.find(n, "gum", 1, true) then
+                    hum:EquipTool(t)
+                    return
+                end
+            end
+        end
+        for _, t in ipairs(bag:GetChildren()) do
+            if t:IsA("Tool") then
+                hum:EquipTool(t)
+                return
+            end
+        end
+    end)
+end
+
+local function LoadCF()
+    pcall(function()
+        local ps = LP:FindFirstChild("PlayerScripts")
+        local cf = ps and ps:FindFirstChild("CombatFramework")
+        if cf then AC = require(cf) end
+    end)
+    pcall(function()
+        if AC and AC.activeController then return end
+        if type(getreg) == "function" then
+            for _, v in pairs(getreg()) do
+                if type(v) == "table" and rawget(v, "activeController") then
+                    AC = v
+                    break
+                end
+            end
+        end
+    end)
+end
+LoadCF()
+task.spawn(function()
+    for _ = 1, 20 do
+        if AC and AC.activeController then break end
+        LoadCF()
+        task.wait(0.3)
+    end
+end)
+LP.CharacterAdded:Connect(function()
+    task.wait(1)
+    AC = nil
+    bp = nil
+    LoadCF()
+end)
+
+local function NoShake()
+    if not ON.Shake then return end
+    pcall(function()
+        local u = RS:FindFirstChild("Util")
+        local s = u and u:FindFirstChild("CameraShaker")
+        if s then
+            local m = require(s)
+            if m and m.Stop then m:Stop() end
+        end
+    end)
+    pcall(function()
+        local ps = LP:FindFirstChild("PlayerScripts")
+        local cf = ps and ps:FindFirstChild("CombatFramework")
+        local cam = cf and cf:FindFirstChild("CameraShaker")
+        if cam then
+            local m = require(cam)
+            if m and m.CameraShakeInstance then
+                m.CameraShakeInstance.CameraShakeState = {
+                    FadingIn = 3, FadingOut = 2, Sustained = 0, Inactive = 1
+                }
+            end
+        end
+    end)
+end
+
+-------------------------------------------------
+-- ATTACK แรงขึ้น (ไม่ใช้เมาส์จอ)
+-------------------------------------------------
+local function PushController()
+    pcall(function()
+        if not AC then LoadCF() end
+        local c = AC and AC.activeController
+        if not c then return end
+        c.timeToNextAttack = 0
+        c.attacking = false
+        c.blocking = false
+        c.hitboxMagnitude = HITBOX
+        if type(c.increment) == "number" then c.increment = 1 end
+        if type(c.focusStart) == "number" then c.focusStart = 0 end
+        if type(c.attack) == "function" then
+            c:attack()
+        end
+    end)
+end
+
+local function Attack()
+    NoShake()
+    Equip()
+
+    -- 1) CombatFramework
+    PushController()
+
+    -- 2) Tool Activate หลายครั้ง
+    pcall(function()
+        local tool = Char() and Char():FindFirstChildOfClass("Tool")
+        if tool then
+            tool:Activate()
+            task.wait(0.02)
+            tool:Activate()
+        end
+    end)
+
+    -- 3) executor mouse1 (ถ้ามี — ไม่โชว์เคอร์เซอร์แบบ VU)
+    pcall(function()
+        if type(mouse1click) == "function" then
+            mouse1click()
+        elseif type(mouse1press) == "function" then
+            mouse1press()
+            task.wait(0.02)
+            if type(mouse1release) == "function" then mouse1release() end
+        end
+    end)
+end
+
+local function ClearBP()
+    if bp then
+        pcall(function() bp:Destroy() end)
+        bp = nil
+    end
+end
+
+local function EnsureBP(h)
+    if bp and bp.Parent == h then return bp end
+    ClearBP()
+    local b = Instance.new("BodyPosition")
+    b.Name = "DPVP_BP"
+    b.MaxForce = Vector3.new(9e5, 9e5, 9e5)
+    b.P = 80000
+    b.D = 2000
+    b.Parent = h
+    bp = b
+    return b
+end
+
+local function GoTo(goal)
+    local h = HRP()
+    if not h then return end
+    local cur = h.Position
+    local dist = (goal - cur).Magnitude
+
+    -- บินเร็วขึ้น
+    if dist > 200 then
+        h.CFrame = CFrame.new(cur + (goal - cur).Unit * math.min(dist, 400), goal)
+    elseif dist > 1.5 then
+        local step = math.min(dist, FLY_SPEED * 0.02)
+        h.CFrame = CFrame.new(cur + (goal - cur).Unit * step, goal)
+    else
+        h.CFrame = CFrame.new(goal)
+    end
+
+    pcall(function()
+        local b = EnsureBP(h)
+        b.Position = goal
+    end)
+    pcall(function()
+        h.AssemblyLinearVelocity = Vector3.zero
+        h.AssemblyAngularVelocity = Vector3.zero
+    end)
+    local hum = Hum()
+    if hum then
+        hum.WalkSpeed = 0
+        hum.JumpPower = 0
+        hum.AutoRotate = false
+    end
+end
+
+local function Aim()
+    local th = TargetRoot()
+    local h = HRP()
+    if not th or not h then return end
+    local look = th.Position + Vector3.new(0, 1.5, 0)
+    h.CFrame = CFrame.lookAt(h.Position, look)
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam then cam.CFrame = CFrame.lookAt(cam.CFrame.Position, look) end
+    end)
+end
+
+RunService.RenderStepped:Connect(function()
+    if ON.Shake then NoShake() end
+    local need = ON.Lock or ON.Fly or ON.Aim or ON.Attack
+    if not need then
+        ClearBP()
+        return
+    end
+    local th = TargetRoot()
+    if not th then return end
+    if ON.Lock or ON.Fly then
+        GoTo(th.Position + Vector3.new(0, LOCK_Y, 0))
+    end
+    if ON.Aim then Aim() end
+    if ON.Attack then PushController() end
+end)
+
+RunService.Stepped:Connect(function()
+    if not (ON.Lock or ON.Fly) then return end
+    pcall(function()
+        local c = Char()
+        if not c then return end
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = false end
+        end
+    end)
+end)
+
+-- ตีถี่ขึ้น
+task.spawn(function()
+    while true do
+        if ON.Attack and TargetRoot() then
+            Attack()
+            task.wait(0.04)
+        else
+            task.wait(0.1)
+        end
+    end
+end)
+
+task.spawn(function()
+    local was = false
+    while true do
+        task.wait(0.25)
+        local now = ON.Lock or ON.Fly
+        if was and not now then
+            ClearBP()
+            pcall(function()
+                local hum = Hum()
+                if hum then
+                    hum.AutoRotate = true
+                    hum.WalkSpeed = 16
+                    hum.JumpPower = 50
+                end
+            end)
+        end
+        was = now
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(50)
+        pcall(function()
+            VU:CaptureController()
+            VU:ClickButton2(Vector2.new())
+        end)
+    end
+end)
+
+local function names()
+    local t = { "Nearest" }
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LP then
+        else
+            table.insert(t, p.Name)
+        end
+    end
+    return t
+end
+
+Window:DrawCategory({ Name = "PVP" })
+local Tab = Window:DrawTab({
+    Name = "Combat",
+    Icon = "swords",
+    Type = "Single",
+    EnableScrolling = true,
+})
+
+local A = Tab:DrawSection({ Name = "Target" })
+A:AddToggle({
+    Name = "Nearest Player",
+    Default = true,
+    Callback = function(v)
+        ON.Nearest = v and true or false
+        if ON.Nearest then
+            local n = Nearest()
+            say(n and ("Near: " .. n.Name) or "No players")
+        end
+    end,
+})
+A:AddDropdown({
+    Name = "Player",
+    Default = "Nearest",
+    Values = names(),
+    Callback = function(v)
+        if v == "Nearest" then
+            ON.Nearest = true
+            TargetName = ""
+        else
+            ON.Nearest = false
+            TargetName = v
+        end
+        say("Target = " .. tostring(v))
+    end,
+})
+A:AddButton({
+    Name = "Pick Nearest",
+    Callback = function()
+        local n = Nearest()
+        if n then
+            TargetName = n.Name
+            ON.Nearest = true
+            say("Target: " .. n.Name)
+        else
+            say("No other players")
+        end
+    end,
+})
+
+local B = Tab:DrawSection({ Name = "Actions" })
+B:AddToggle({
+    Name = "LOCK",
+    Default = false,
+    Callback = function(v)
+        ON.Lock = v and true or false
+        if ON.Lock then
+            local n = Nearest()
+            say(n and ("LOCK -> " .. n.Name) or "LOCK (no target)")
+        else
+            say("LOCK off")
+            ClearBP()
+        end
+    end,
+})
+B:AddToggle({
+    Name = "FLY",
+    Default = false,
+    Callback = function(v)
+        ON.Fly = v and true or false
+        say(ON.Fly and "FLY on" or "FLY off")
+        if not ON.Fly and not ON.Lock then ClearBP() end
+    end,
+})
+B:AddToggle({
+    Name = "AIM",
+    Default = false,
+    Callback = function(v)
+        ON.Aim = v and true or false
+        say(ON.Aim and "AIM on" or "AIM off")
+    end,
+})
+B:AddToggle({
+    Name = "ATTACK",
+    Default = false,
+    Callback = function(v)
+        ON.Attack = v and true or false
+        if ON.Attack then
+            Equip()
+            LoadCF()
+        end
+        say(ON.Attack and "ATTACK on" or "ATTACK off")
+    end,
+})
+B:AddToggle({
+    Name = "Anti Shake",
+    Default = true,
+    Callback = function(v) ON.Shake = v and true or false end,
+})
+B:AddParagraph({
+    Title = "Tip",
+    Content = "Hold sword in hand\nLOCK+AIM+ATTACK\nFly speed 450",
+})
+
+say("PVP · faster fly · stronger attack")
+print("[D] Attack fix · Fly 450")
