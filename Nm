@@ -1,0 +1,471 @@
+--[[
+    D Combat · Full Functions
+    UI เล็ก + โลโก้ · ตีมอนดรอปของ · ตีผู้เล่น · Aim Lock
+]]
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LP = Players.LocalPlayer
+local PlayerGui = LP:WaitForChild("PlayerGui")
+
+-------------------------------------------------
+-- CONFIG
+-------------------------------------------------
+local RANGE = 200
+local LOOP_DELAY = 0.05
+local FAST_DELAY = 0.025
+local GATHER_RANGE = 400
+local GATHER_DIST = 10
+local HIT_ID = "043adb20"
+local MAX_TARGETS = 25
+
+local Settings = {
+    AutoAttack = false,
+    FastAttack = false,
+    Gather = false,
+    AttackPlayers = false,
+    AimLock = false,
+    AimPlayerName = "",
+    Running = true,
+}
+
+-------------------------------------------------
+-- REMOTE
+-------------------------------------------------
+local RegisterAttack, RegisterHit
+pcall(function()
+    local Net = RS:WaitForChild("Modules", 8):WaitForChild("Net", 8)
+    RegisterAttack = Net:WaitForChild("RE/RegisterAttack", 8)
+    RegisterHit = Net:WaitForChild("RE/RegisterHit", 8)
+end)
+
+-------------------------------------------------
+-- HELPERS
+-------------------------------------------------
+local function Char(plr)
+    plr = plr or LP
+    return plr.Character
+end
+
+local function HRP(plr)
+    local c = Char(plr)
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function Hum(model)
+    return model and model:FindFirstChildOfClass("Humanoid")
+end
+
+local function IsAlive(model)
+    local h = Hum(model)
+    return h and h.Health > 0
+end
+
+local function GetHitPart(model)
+    return model:FindFirstChild("LeftLowerArm")
+        or model:FindFirstChild("LeftUpperArm")
+        or model:FindFirstChild("RightLowerArm")
+        or model:FindFirstChild("UpperTorso")
+        or model:FindFirstChild("Torso")
+        or model:FindFirstChild("HumanoidRootPart")
+end
+
+-------------------------------------------------
+-- FIND PLAYER
+-------------------------------------------------
+local function FindPlayerByName(name)
+    if not name or name == "" then return nil end
+    name = string.lower(string.gsub(name, "^%s*(.-)%s*$", "%1"))
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if string.lower(p.Name) == name then return p end
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if string.lower(p.DisplayName) == name then return p end
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if string.find(string.lower(p.Name), name, 1, true) then return p end
+    end
+    return nil
+end
+
+-------------------------------------------------
+-- TARGETS
+-------------------------------------------------
+local function GetTargets()
+    local h = HRP()
+    if not h then return {} end
+    local pos = h.Position
+    local list = {}
+
+    -- มอน
+    local folder = workspace:FindFirstChild("Enemies")
+    if folder then
+        for _, mob in ipairs(folder:GetChildren()) do
+            if #list >= MAX_TARGETS then break end
+            if IsAlive(mob) then
+                local root = mob:FindFirstChild("HumanoidRootPart")
+                local part = GetHitPart(mob)
+                if root and part then
+                    local d = (root.Position - pos).Magnitude
+                    if d <= RANGE then
+                        table.insert(list, { part = part, root = root, model = mob, dist = d, name = mob.Name })
+                    end
+                end
+            end
+        end
+    end
+
+    -- ผู้เล่น
+    if Settings.AttackPlayers then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr \~= LP and #list < MAX_TARGETS then
+                local c = Char(plr)
+                if c and IsAlive(c) then
+                    local root = HRP(plr)
+                    local part = GetHitPart(c)
+                    if root and part then
+                        local d = (root.Position - pos).Magnitude
+                        if d <= RANGE then
+                            table.insert(list, { part = part, root = root, model = c, dist = d, name = plr.Name })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(list, function(a, b) return a.dist < b.dist end)
+    return list
+end
+
+-------------------------------------------------
+-- ATTACK (ดรอปของได้)
+-------------------------------------------------
+local function DoAttack(targets)
+    if #targets == 0 then return end
+    if not RegisterAttack or not RegisterHit then return end
+
+    pcall(function()
+        RegisterAttack:FireServer(0.4, 1)
+    end)
+
+    for _, t in ipairs(targets) do
+        if t.model and t.model.Parent and IsAlive(t.model) then
+            pcall(function()
+                local args = {
+                    [1] = t.part,
+                    [2] = {},
+                    [4] = HIT_ID
+                }
+                RegisterHit:FireServer(unpack(args))
+            end)
+        end
+    end
+end
+
+-------------------------------------------------
+-- GATHER
+-------------------------------------------------
+local function GatherMobs()
+    local h = HRP()
+    if not h then return end
+    local folder = workspace:FindFirstChild("Enemies")
+    if not folder then return end
+
+    local i = 0
+    for _, mob in ipairs(folder:GetChildren()) do
+        if IsAlive(mob) then
+            local root = mob:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - h.Position).Magnitude <= GATHER_RANGE then
+                i = i + 1
+                local angle = (i / 14) * math.pi * 2
+                local offset = Vector3.new(math.cos(angle) * GATHER_DIST, 0, math.sin(angle) * GATHER_DIST)
+                pcall(function()
+                    root.CFrame = CFrame.new(h.Position + offset)
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end)
+            end
+        end
+    end
+end
+
+-------------------------------------------------
+-- AIM LOCK
+-------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    if not Settings.AimLock then return end
+    local target = FindPlayerByName(Settings.AimPlayerName)
+    if not target or target == LP then return end
+
+    local root = HRP(target)
+    local cam = workspace.CurrentCamera
+    if not root or not cam then return end
+    if not IsAlive(Char(target)) then return end
+
+    pcall(function()
+        cam.CFrame = CFrame.lookAt(cam.CFrame.Position, root.Position)
+    end)
+end)
+
+-------------------------------------------------
+-- UI
+-------------------------------------------------
+pcall(function()
+    local old = PlayerGui:FindFirstChild("DCombatUI")
+    if old then old:Destroy() end
+end)
+
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "DCombatUI"
+Gui.ResetOnSpawn = false
+Gui.Parent = PlayerGui
+
+-- โลโก้
+local Logo = Instance.new("TextButton")
+Logo.Size = UDim2.fromOffset(48, 48)
+Logo.Position = UDim2.new(0, 14, 0.5, -24)
+Logo.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
+Logo.Text = "D"
+Logo.TextColor3 = Color3.new(1, 1, 1)
+Logo.TextSize = 20
+Logo.Font = Enum.Font.GothamBold
+Logo.Parent = Gui
+Instance.new("UICorner", Logo).CornerRadius = UDim.new(1, 0)
+local logoStroke = Instance.new("UIStroke")
+logoStroke.Color = Color3.fromRGB(70, 140, 255)
+logoStroke.Thickness = 2
+logoStroke.Parent = Logo
+
+-- หน้าต่างหลัก
+local Main = Instance.new("Frame")
+Main.Size = UDim2.fromOffset(240, 360)
+Main.Position = UDim2.new(0, 70, 0.5, -180)
+Main.BackgroundColor3 = Color3.fromRGB(15, 17, 23)
+Main.BorderSizePixel = 0
+Main.Visible = true
+Main.Parent = Gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 34)
+Title.BackgroundColor3 = Color3.fromRGB(22, 26, 36)
+Title.BorderSizePixel = 0
+Title.Text = "  D COMBAT"
+Title.TextColor3 = Color3.fromRGB(240, 245, 255)
+Title.TextSize = 14
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Main
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 10)
+
+-- Target Info
+local TargetInfo = Instance.new("TextLabel")
+TargetInfo.Size = UDim2.new(1, -16, 0, 36)
+TargetInfo.Position = UDim2.new(0, 8, 0, 40)
+TargetInfo.BackgroundColor3 = Color3.fromRGB(28, 32, 42)
+TargetInfo.Text = "TARGET : NONE"
+TargetInfo.TextColor3 = Color3.fromRGB(230, 235, 245)
+TargetInfo.TextSize = 11
+TargetInfo.Font = Enum.Font.Gotham
+TargetInfo.Parent = Main
+Instance.new("UICorner", TargetInfo).CornerRadius = UDim.new(0, 6)
+
+local function AddToggle(name, key, y)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -16, 0, 30)
+    btn.Position = UDim2.new(0, 8, 0, y)
+    btn.BackgroundColor3 = Color3.fromRGB(30, 34, 44)
+    btn.BorderSizePixel = 0
+    btn.Text = name .. "  · OFF"
+    btn.TextColor3 = Color3.fromRGB(230, 235, 245)
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamMedium
+    btn.Parent = Main
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    btn.MouseButton1Click:Connect(function()
+        Settings[key] = not Settings[key]
+        local on = Settings[key]
+        btn.Text = name .. (on and "  · ON" or "  · OFF")
+        btn.BackgroundColor3 = on and Color3.fromRGB(30, 100, 60) or Color3.fromRGB(30, 34, 44)
+    end)
+    return btn
+end
+
+AddToggle("Auto Attack", "AutoAttack", 84)
+AddToggle("Fast Attack", "FastAttack", 120)
+AddToggle("Gather Mob", "Gather", 156)
+AddToggle("Attack Players", "AttackPlayers", 192)
+
+-- Aim Lock
+local AimBtn = Instance.new("TextButton")
+AimBtn.Size = UDim2.new(1, -16, 0, 30)
+AimBtn.Position = UDim2.new(0, 8, 0, 228)
+AimBtn.BackgroundColor3 = Color3.fromRGB(30, 34, 44)
+AimBtn.BorderSizePixel = 0
+AimBtn.Text = "Aim Lock  · OFF"
+AimBtn.TextColor3 = Color3.fromRGB(230, 235, 245)
+AimBtn.TextSize = 12
+AimBtn.Font = Enum.Font.GothamMedium
+AimBtn.Parent = Main
+Instance.new("UICorner", AimBtn).CornerRadius = UDim.new(0, 6)
+
+local NameBox = Instance.new("TextBox")
+NameBox.Size = UDim2.new(1, -16, 0, 28)
+NameBox.Position = UDim2.new(0, 8, 0, 264)
+NameBox.BackgroundColor3 = Color3.fromRGB(28, 32, 42)
+NameBox.PlaceholderText = "ชื่อผู้เล่นที่ต้องการล็อก"
+NameBox.Text = ""
+NameBox.TextColor3 = Color3.new(1, 1, 1)
+NameBox.PlaceholderColor3 = Color3.fromRGB(140, 150, 170)
+NameBox.TextSize = 11
+NameBox.Font = Enum.Font.Gotham
+NameBox.ClearTextOnFocus = false
+NameBox.Parent = Main
+Instance.new("UICorner", NameBox).CornerRadius = UDim.new(0, 6)
+
+local AimInfo = Instance.new("TextLabel")
+AimInfo.Size = UDim2.new(1, -16, 0, 22)
+AimInfo.Position = UDim2.new(0, 8, 0, 298)
+AimInfo.BackgroundTransparency = 1
+AimInfo.Text = "AIM : NONE"
+AimInfo.TextColor3 = Color3.fromRGB(160, 170, 190)
+AimInfo.TextSize = 11
+AimInfo.Font = Enum.Font.Gotham
+AimInfo.TextXAlignment = Enum.TextXAlignment.Left
+AimInfo.Parent = Main
+
+local RangeInfo = Instance.new("TextLabel")
+RangeInfo.Size = UDim2.new(1, -16, 0, 20)
+RangeInfo.Position = UDim2.new(0, 8, 0, 322)
+RangeInfo.BackgroundTransparency = 1
+RangeInfo.Text = "Range " .. RANGE
+RangeInfo.TextColor3 = Color3.fromRGB(140, 150, 170)
+RangeInfo.TextSize = 11
+RangeInfo.Font = Enum.Font.Gotham
+RangeInfo.Parent = Main
+
+AimBtn.MouseButton1Click:Connect(function()
+    Settings.AimPlayerName = NameBox.Text
+    if Settings.AimPlayerName == "" then
+        AimBtn.Text = "Aim Lock  · ใส่ชื่อก่อน"
+        return
+    end
+    local target = FindPlayerByName(Settings.AimPlayerName)
+    if not target then
+        AimBtn.Text = "Aim Lock  · ไม่พบผู้เล่น"
+        Settings.AimLock = false
+        task.delay(1.2, function()
+            if AimBtn.Parent then AimBtn.Text = "Aim Lock  · OFF" end
+        end)
+        return
+    end
+    Settings.AimLock = not Settings.AimLock
+    if Settings.AimLock then
+        AimBtn.Text = "Aim Lock  · " .. target.Name
+        AimBtn.BackgroundColor3 = Color3.fromRGB(140, 50, 50)
+    else
+        AimBtn.Text = "Aim Lock  · OFF"
+        AimBtn.BackgroundColor3 = Color3.fromRGB(30, 34, 44)
+    end
+end)
+
+NameBox.FocusLost:Connect(function()
+    Settings.AimPlayerName = NameBox.Text
+end)
+
+Logo.MouseButton1Click:Connect(function()
+    Main.Visible = not Main.Visible
+end)
+
+-- ลาก
+local function MakeDrag(frame, handle)
+    local dragging, start, pos
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            start = input.Position
+            pos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - start
+            frame.Position = UDim2.new(pos.X.Scale, pos.X.Offset + d.X, pos.Y.Scale, pos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+MakeDrag(Main, Title)
+MakeDrag(Logo, Logo)
+
+-------------------------------------------------
+-- UI UPDATE
+-------------------------------------------------
+task.spawn(function()
+    while Settings.Running and Gui.Parent do
+        pcall(function()
+            local targets = GetTargets()
+            local t = targets[1]
+            if t and IsAlive(t.model) then
+                local hum = Hum(t.model)
+                if hum then
+                    TargetInfo.Text = "TARGET : " .. t.name .. "\nHP : " .. math.floor(hum.Health) .. " / " .. math.floor(hum.MaxHealth)
+                end
+            else
+                TargetInfo.Text = "TARGET : NONE"
+            end
+
+            if Settings.AimLock then
+                local p = FindPlayerByName(Settings.AimPlayerName)
+                AimInfo.Text = p and ("AIM : " .. p.Name) or "AIM : NOT FOUND"
+            else
+                AimInfo.Text = "AIM : NONE"
+            end
+        end)
+        task.wait(0.2)
+    end
+end)
+
+-------------------------------------------------
+-- COMBAT LOOP
+-------------------------------------------------
+task.spawn(function()
+    while Settings.Running do
+        pcall(function()
+            if Settings.Gather then
+                GatherMobs()
+            end
+            if Settings.AutoAttack then
+                local targets = GetTargets()
+                if #targets > 0 then
+                    DoAttack(targets)
+                end
+            end
+        end)
+
+        if Settings.FastAttack then
+            task.wait(FAST_DELAY)
+        else
+            task.wait(LOOP_DELAY)
+        end
+    end
+end)
+
+LP.CharacterAdded:Connect(function()
+    task.wait(1)
+end)
+
+Gui.Destroying:Connect(function()
+    Settings.Running = false
+end)
+
+print("[D Combat] Full Ready · ทุกฟังก์ชันครบ")
